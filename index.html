@@ -95,6 +95,7 @@
     <div style="display:flex;align-items:center;gap:10px"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="7" fill="#1F4E9A"/><rect x="7" y="15" width="5" height="12" rx="2.5" fill="#fff"/><rect x="14.5" y="6" width="5" height="21" rx="2.5" fill="#fff"/><rect x="22" y="11" width="5" height="16" rx="2.5" fill="#fff"/></svg><div><strong style="display:block">Cockpit de aderência Trizy</strong><span style="font-size:13px;color:var(--color-fg-muted)">Uso interno · Grupo Maroni</span></div></div>
     <label for="tz-pw" style="font-size:13px;color:var(--color-fg-muted)">Senha de acesso</label>
     <input id="tz-pw" type="password" autocomplete="current-password" required style="font:inherit;padding:9px 10px;border:1px solid var(--color-border-line);border-radius:8px;background:var(--color-bg);color:var(--color-fg)">
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--color-fg-muted);cursor:pointer"><input id="tz-lembrar" type="checkbox" checked> Lembrar neste dispositivo</label>
     <span id="tz-pwerr" hidden style="font-size:13px;color:var(--color-bad)">Senha incorreta. Confira com a equipe de G&amp;D.</span>
     <button type="submit" style="font:inherit;background:#1F4E9A;color:#fff;border:0;border-radius:8px;padding:9px;cursor:pointer">Entrar</button>
   </form>
@@ -139,7 +140,7 @@
   .tz-fper { display: flex; align-items: center; gap: var(--cds-gap-sm); flex: 1 1 28rem; min-width: min(100%, 18rem); }
   .tz-fsel { font-size: var(--cds-font-size-caption); }
   .tz-fbar .tz-busca { width: 12rem; }
-  .tz-range { position: relative; flex: 1; height: 36px; min-width: 10rem; }
+  .tz-range { position: relative; flex: 1; height: 44px; min-width: 14rem; }
   .tz-rs-track { position: absolute; left: 12px; right: 12px; top: 10px; height: 6px; border-radius: 3px; background: var(--color-border-line); cursor: pointer; touch-action: none; }
   .tz-rs-fill { position: absolute; top: 0; height: 100%; min-width: 0; background: #1F4E9A; border-radius: 3px; }
   .tz-rs-h { position: absolute; top: -6px; width: 18px; height: 18px; margin-left: -9px; padding: 0; border-radius: 50%; background: #fff; border: 2px solid #1F4E9A; cursor: grab; touch-action: none; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
@@ -597,7 +598,7 @@
     track.append(fill);
     const labs = ms.map((r, i) => {
       const l = document.createElement('button'); l.type = 'button'; l.className = 'tz-rs-lab';
-      l.textContent = n > 6 && i > 0 ? r.periodo.split('/')[0] : r.periodo; l.style.left = pos(i) + '%';
+      l.textContent = n > 6 ? r.periodo.split('/')[0] : r.periodo; l.style.left = pos(i) + '%';
       if (n > 1 && i === 0) l.style.transform = 'translateX(-15%)';
       if (n > 1 && i === n - 1) l.style.transform = 'translateX(-85%)';
       l.title = 'Só ' + r.periodo;
@@ -1065,22 +1066,47 @@
 <script>
 (() => {
   const enc = window.__TZ_ENC__, d = (x) => Uint8Array.from(atob(x), (c) => c.charCodeAt(0));
-  const form = document.getElementById('tz-lockform'), pw = document.getElementById('tz-pw'), err = document.getElementById('tz-pwerr');
-  const abrir = async (senha) => {
-    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveKey']);
-    const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: d(enc.s), iterations: enc.n, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  const b64 = (u) => btoa(String.fromCharCode(...new Uint8Array(u)));
+  const SLOT = 'tz-cockpit-chave-' + enc.s.slice(0, 12);
+  const form = document.getElementById('tz-lockform'), pw = document.getElementById('tz-pw'), err = document.getElementById('tz-pwerr'), lembrar = document.getElementById('tz-lembrar');
+  const lock = document.getElementById('tz-lock');
+  const guardar = (k) => { try { localStorage.setItem(SLOT, k); } catch (e) {} };
+  const esquecer = () => { try { localStorage.removeItem(SLOT); } catch (e) {} };
+  const derivar = async (senha) => {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveBits']);
+    return crypto.subtle.deriveBits({ name: 'PBKDF2', salt: d(enc.s), iterations: enc.n, hash: 'SHA-256' }, base, 256);
+  };
+  const abrir = async (bits) => {
+    const key = await crypto.subtle.importKey('raw', bits, 'AES-GCM', false, ['decrypt']);
     const txt = new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: d(enc.i) }, key, d(enc.c)));
     window.__TZ_ROWS__ = JSON.parse(txt);
-    document.getElementById('tz-lock').remove();
+    lock.remove();
     document.querySelector('.tz-wrap').hidden = false;
     dash.__start();
+    const acts = document.querySelector('.tz-actions');
+    if (acts) {
+      const sair = document.createElement('button');
+      sair.type = 'button'; sair.className = 'tz-clear'; sair.textContent = 'Sair';
+      sair.title = 'Esquece a senha neste dispositivo e volta para a tela de acesso';
+      sair.onclick = () => { esquecer(); location.reload(); };
+      acts.append(sair);
+    }
   };
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); err.hidden = true;
-    const b = form.querySelector('button'); b.disabled = true; b.textContent = 'Abrindo…';
-    try { await abrir(pw.value); } catch (x) { err.hidden = false; b.disabled = false; b.textContent = 'Entrar'; pw.select(); }
+    const b = form.querySelector('button[type=submit]'); b.disabled = true; b.textContent = 'Abrindo…';
+    try {
+      const bits = await derivar(pw.value);
+      await abrir(bits);
+      if (lembrar.checked) guardar(b64(bits)); else esquecer();
+    } catch (x) { err.hidden = false; b.disabled = false; b.textContent = 'Entrar'; pw.select(); }
   });
-  pw.focus();
+  let salvo = null;
+  try { salvo = localStorage.getItem(SLOT); } catch (e) {}
+  if (salvo) {
+    lock.style.visibility = 'hidden';
+    abrir(d(salvo)).catch(() => { esquecer(); lock.style.visibility = ''; pw.focus(); });
+  } else pw.focus();
 })();
 </script>
 </body>
